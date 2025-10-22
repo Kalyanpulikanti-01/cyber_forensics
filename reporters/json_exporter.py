@@ -10,9 +10,18 @@ import json
 import logging
 from typing import Dict, Any
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, date
 
 logger = logging.getLogger(__name__)
+
+class CustomJSONEncoder(json.JSONEncoder):
+    """Custom JSON encoder to handle specific types."""
+    def default(self, obj):
+        if isinstance(obj, (datetime, date)):
+            return obj.isoformat()
+        if isinstance(obj, Path):
+            return str(obj)
+        return super().default(obj)
 
 
 class JSONExporter:
@@ -51,7 +60,7 @@ class JSONExporter:
             
             # Write the file
             with open(str(output_path), 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2, ensure_ascii=False, default=str)
+                json.dump(data, f, indent=2, ensure_ascii=False, cls=CustomJSONEncoder)
             
             logger.info(f"JSON export saved to {output_path}")
             return str(output_path)
