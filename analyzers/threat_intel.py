@@ -23,6 +23,7 @@ import logging
 import time
 from typing import Dict, List, Optional, Any
 from urllib.parse import urlparse
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 import hashlib
 import base64
 
@@ -30,20 +31,15 @@ try:
     import requests
     from netlas import Netlas
     from netlas.exception import APIError
-    # Try importing new Censys Platform SDK first
+    # Import Censys Platform SDK (v3 API with PAT support)
+    # Note: Legacy censys package (v2 API) is deprecated and no longer supports PAT authentication
     try:
         from censys_platform import SDK as CensysPlatformSDK
-        CensysHosts = None  # Legacy SDK not needed
         CENSYS_PLATFORM_AVAILABLE = True
     except ImportError:
         CensysPlatformSDK = None
-        # Fall back to legacy SDK if available
-        try:
-            from censys.search import CensysHosts
-            CENSYS_PLATFORM_AVAILABLE = False
-        except ImportError:
-            CensysHosts = None
-            CENSYS_PLATFORM_AVAILABLE = False
+        CENSYS_PLATFORM_AVAILABLE = False
+        logging.warning("Censys Platform SDK not available. Install with: pip install censys-platform>=0.9.0")
 except ImportError as e:
     logging.warning(f"Some threat intelligence dependencies not available: {e}")
 
@@ -52,13 +48,22 @@ logger = logging.getLogger(__name__)
 
 class ThreatIntelligence:
     """Threat intelligence gathering and analysis."""
-    
+
+    # Configuration constants
+    DEFAULT_CENSYS_RESULTS_PER_PAGE = 5
+    DEFAULT_CENSYS_MAX_SERVICES = 3
+
     def __init__(self, config: Dict[str, Any]):
         """Initialize threat intelligence analyzer with configuration."""
         self.config = config
         self.timeout = config.get('timeouts', {}).get('threat_intel', 60)
         self.session = requests.Session()
         self.session.timeout = self.timeout
+
+        # Censys configuration
+        censys_config_options = config.get('censys', {})
+        self.censys_results_per_page = censys_config_options.get('results_per_page', self.DEFAULT_CENSYS_RESULTS_PER_PAGE)
+        self.censys_max_services = censys_config_options.get('max_services', self.DEFAULT_CENSYS_MAX_SERVICES)
         
         # API keys from config
         self.api_keys = config.get('api_keys', {})
@@ -154,16 +159,19 @@ class ThreatIntelligence:
 
             vt_result, netlas_result, censys_result = await asyncio.gather(*tasks, return_exceptions=True)
 
+            # Handle VirusTotal results
             if not isinstance(vt_result, Exception) and vt_result:
                 result['virustotal'] = vt_result
 
+            # Handle Netlas results - function already returns properly structured dict
             if isinstance(netlas_result, Exception):
                 result['netlas'] = {'available': False, 'error': str(netlas_result)}
-            elif netlas_result:
-                result['netlas'] = {'available': True, 'data': netlas_result}
+            elif netlas_result and isinstance(netlas_result, dict):
+                result['netlas'] = netlas_result
             else:
                 result['netlas'] = {'available': False, 'error': 'No data returned from Netlas'}
 
+            # Handle Censys results - function already returns properly structured dict
             if isinstance(censys_result, Exception):
                 result['censys'] = {'available': False, 'error': str(censys_result)}
             elif censys_result and isinstance(censys_result, dict):
@@ -397,6 +405,19 @@ class ThreatIntelligence:
             'error': None
         }
 
+        # Validate domain input
+        if not domain or not isinstance(domain, str):
+            result['error'] = 'Invalid domain provided'
+            return result
+
+        # Basic domain sanitization - remove whitespace and convert to lowercase
+        domain = domain.strip().lower()
+
+        # Basic validation - check for valid characters
+        if not all(c.isalnum() or c in '.-' for c in domain):
+            result['error'] = 'Domain contains invalid characters'
+            return result
+
         # Check if we have PAT token
         if not self.censys_token:
             result['error'] = 'Censys Personal Access Token (PAT) not configured'
@@ -409,8 +430,8 @@ class ThreatIntelligence:
 
         # Check if organization ID is available (required for search API)
         if not self.censys_org_id:
-            result['error'] = 'Censys search requires Organization ID (paid plan or research access). Free tier only supports lookup endpoints. For research access, visit: https://censys.io/contact'
-            logger.warning("Censys free tier does not support search API. Skipping Censys check.")
+            result['error'] = 'Censys search API requires Organization ID (available with paid plans or research accounts). This integration uses the search API which is not available on the free tier. For research access, visit: https://censys.io/contact'
+            logger.warning("Censys Organization ID not configured. Search API requires paid plan or research access. Skipping Censys check.")
             return result
 
         try:
@@ -420,7 +441,7 @@ class ThreatIntelligence:
             # Execute search in thread pool to avoid blocking
             loop = asyncio.get_running_loop()
 
-            def search_censys():
+            def search_censys() -> List[Dict[str, Any]]:
                 """Search Censys in synchronous context."""
                 # Initialize Platform SDK with PAT
                 from censys_platform.models import SearchQueryInputBody
@@ -434,7 +455,7 @@ class ThreatIntelligence:
                     # Create search query body
                     search_body = SearchQueryInputBody(
                         query=query,
-                        per_page=5,
+                        per_page=self.censys_results_per_page,
                         cursor="",  # Start from beginning
                     )
 
@@ -453,7 +474,18 @@ class ThreatIntelligence:
 
                     return hits
 
-            search_results = await loop.run_in_executor(None, search_censys)
+            # Use dedicated thread pool with timeout
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(search_censys)
+                try:
+                    search_results = await asyncio.wait_for(
+                        loop.run_in_executor(None, future.result, self.timeout),
+                        timeout=self.timeout
+                    )
+                except (asyncio.TimeoutError, FuturesTimeoutError):
+                    result['error'] = f'Censys search timed out after {self.timeout} seconds'
+                    logger.error(f"Censys search timeout for domain: {domain}")
+                    return result
 
             logger.info(f"Censys: Found {len(search_results)} hosts")
 
@@ -466,9 +498,9 @@ class ThreatIntelligence:
                     'services': []
                 }
 
-                # Extract service information (limit to 3)
+                # Extract service information (configurable limit)
                 if 'services' in hit:
-                    for service in hit.get('services', [])[:3]:
+                    for service in hit.get('services', [])[:self.censys_max_services]:
                         service_info = {
                             'port': service.get('port'),
                             'service_name': service.get('service_name'),

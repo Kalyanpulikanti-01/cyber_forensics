@@ -35,7 +35,7 @@ async def test_censys():
     # ===============================================
     # CHANGE THIS DOMAIN TO ANALYZE ANY WEBSITE
     # ===============================================
-    domain = "linkedin.com"
+    domain = "example.com"
     
     print("=" * 70)
     print("🔍 Censys Domain Analysis")
