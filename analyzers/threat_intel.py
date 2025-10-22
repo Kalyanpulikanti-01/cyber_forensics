@@ -30,6 +30,20 @@ try:
     import requests
     from netlas import Netlas
     from netlas.exception import APIError
+    # Try importing new Censys Platform SDK first
+    try:
+        from censys_platform import SDK as CensysPlatformSDK
+        CensysHosts = None  # Legacy SDK not needed
+        CENSYS_PLATFORM_AVAILABLE = True
+    except ImportError:
+        CensysPlatformSDK = None
+        # Fall back to legacy SDK if available
+        try:
+            from censys.search import CensysHosts
+            CENSYS_PLATFORM_AVAILABLE = False
+        except ImportError:
+            CensysHosts = None
+            CENSYS_PLATFORM_AVAILABLE = False
 except ImportError as e:
     logging.warning(f"Some threat intelligence dependencies not available: {e}")
 
@@ -52,6 +66,19 @@ class ThreatIntelligence:
         self.urlvoid_key = self.api_keys.get('urlvoid')
         self.abuseipdb_key = self.api_keys.get('abuseipdb')
         self.netlas_key = self.api_keys.get('netlas')
+        
+        # Censys can be either PAT (string) or old-style credentials (dict)
+        censys_config = self.api_keys.get('censys', {})
+        if isinstance(censys_config, str):
+            self.censys_token = censys_config  # Personal Access Token
+            self.censys_org_id = None
+            self.censys_id = None
+            self.censys_secret = None
+        else:
+            self.censys_token = censys_config.get('token') or censys_config.get('personal_access_token')
+            self.censys_org_id = censys_config.get('organization_id') or censys_config.get('org_id')
+            self.censys_id = censys_config.get('api_id')
+            self.censys_secret = censys_config.get('api_secret')
         
         # API endpoints
         self.virustotal_url_api = "https://www.virustotal.com/api/v3/urls"
@@ -101,6 +128,7 @@ class ThreatIntelligence:
             'domain': domain,
             'virustotal': {},
             'netlas': {},
+            'censys': {},
             'threat_score': 0,
             'is_malicious': False,
             'categories': [],
@@ -119,13 +147,29 @@ class ThreatIntelligence:
             else:
                 tasks.append(asyncio.sleep(0))
 
-            vt_result, netlas_result = await asyncio.gather(*tasks, return_exceptions=True)
+            if self.censys_token or (self.censys_id and self.censys_secret):
+                tasks.append(self._check_censys_domain(domain))
+            else:
+                tasks.append(asyncio.sleep(0))
+
+            vt_result, netlas_result, censys_result = await asyncio.gather(*tasks, return_exceptions=True)
 
             if not isinstance(vt_result, Exception) and vt_result:
                 result['virustotal'] = vt_result
 
-            if not isinstance(netlas_result, Exception) and netlas_result:
-                result['netlas'] = netlas_result
+            if isinstance(netlas_result, Exception):
+                result['netlas'] = {'available': False, 'error': str(netlas_result)}
+            elif netlas_result:
+                result['netlas'] = {'available': True, 'data': netlas_result}
+            else:
+                result['netlas'] = {'available': False, 'error': 'No data returned from Netlas'}
+
+            if isinstance(censys_result, Exception):
+                result['censys'] = {'available': False, 'error': str(censys_result)}
+            elif censys_result and isinstance(censys_result, dict):
+                result['censys'] = censys_result
+            else:
+                result['censys'] = {'available': False, 'error': 'No data returned from Censys'}
 
             # Extract key information
             if 'data' in result.get('virustotal', {}):
@@ -279,11 +323,11 @@ class ThreatIntelligence:
                 result['error'] = 'Domain not found in VirusTotal database'
             else:
                 result['error'] = f"Request failed: {response.status_code}"
-                
+
         except Exception as e:
             logger.error(f"VirusTotal domain check failed: {e}")
             result['error'] = str(e)
-        
+
         return result
     
     async def _check_virustotal_ip(self, ip: str) -> Dict[str, Any]:
@@ -345,6 +389,117 @@ class ThreatIntelligence:
 
         return result
     
+    async def _check_censys_domain(self, domain: str) -> Dict[str, Any]:
+        """Get domain details from Censys using Platform API SDK."""
+        result = {
+            'available': False,
+            'data': [],
+            'error': None
+        }
+
+        # Check if we have PAT token
+        if not self.censys_token:
+            result['error'] = 'Censys Personal Access Token (PAT) not configured'
+            return result
+
+        # Check if Platform SDK is available
+        if not CENSYS_PLATFORM_AVAILABLE or CensysPlatformSDK is None:
+            result['error'] = 'Censys Platform SDK not installed. Run: pip install censys-platform'
+            return result
+
+        # Check if organization ID is available (required for search API)
+        if not self.censys_org_id:
+            result['error'] = 'Censys search requires Organization ID (paid plan or research access). Free tier only supports lookup endpoints. For research access, visit: https://censys.io/contact'
+            logger.warning("Censys free tier does not support search API. Skipping Censys check.")
+            return result
+
+        try:
+            query = f"services.dns.names.name:{domain}"
+            logger.info(f"Censys: Searching with query: {query}")
+
+            # Execute search in thread pool to avoid blocking
+            loop = asyncio.get_running_loop()
+
+            def search_censys():
+                """Search Censys in synchronous context."""
+                # Initialize Platform SDK with PAT
+                from censys_platform.models import SearchQueryInputBody
+
+                # Initialize SDK with organization ID if available
+                sdk_kwargs = {'personal_access_token': self.censys_token}
+                if self.censys_org_id:
+                    sdk_kwargs['organization_id'] = self.censys_org_id
+
+                with CensysPlatformSDK(**sdk_kwargs) as sdk:
+                    # Create search query body
+                    search_body = SearchQueryInputBody(
+                        query=query,
+                        per_page=5,
+                        cursor="",  # Start from beginning
+                    )
+
+                    # Search using global_data module (org_id passed automatically from SDK init)
+                    search_response = sdk.global_data.search(
+                        search_query_input_body=search_body
+                    )
+
+                    # Extract results from response object
+                    if hasattr(search_response, 'result'):
+                        hits = search_response.result.hits if hasattr(search_response.result, 'hits') else []
+                    elif isinstance(search_response, dict):
+                        hits = search_response.get('result', {}).get('hits', [])
+                    else:
+                        hits = []
+
+                    return hits
+
+            search_results = await loop.run_in_executor(None, search_censys)
+
+            logger.info(f"Censys: Found {len(search_results)} hosts")
+
+            # Extract key information from each host
+            for hit in search_results:
+                host_data = {
+                    'ip': hit.get('ip'),
+                    'location': hit.get('location', {}),
+                    'autonomous_system': hit.get('autonomous_system', {}),
+                    'services': []
+                }
+
+                # Extract service information (limit to 3)
+                if 'services' in hit:
+                    for service in hit.get('services', [])[:3]:
+                        service_info = {
+                            'port': service.get('port'),
+                            'service_name': service.get('service_name'),
+                            'transport_protocol': service.get('transport_protocol')
+                        }
+                        host_data['services'].append(service_info)
+
+                result['data'].append(host_data)
+                logger.info(f"Censys: Found host {host_data['ip']}")
+
+            if result['data']:
+                result['available'] = True
+            else:
+                result['error'] = 'No hosts found for this domain'
+
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Censys domain check failed: {e}", exc_info=True)
+
+            # Provide helpful error messages
+            if '401' in error_msg or 'Unauthorized' in error_msg or 'authentication' in error_msg.lower():
+                result['error'] = 'Authentication failed - check your Censys Personal Access Token (PAT)'
+            elif '429' in error_msg or 'rate limit' in error_msg.lower():
+                result['error'] = 'Rate limit exceeded - please wait before making more requests'
+            elif 'organization' in error_msg.lower():
+                result['error'] = 'Organization ID may be required - check if your account needs organization_id parameter'
+            else:
+                result['error'] = f"An exception occurred: {type(e).__name__} - {e}"
+
+        return result
+
     async def _check_abuseipdb(self, ip: str) -> Dict[str, Any]:
         """Check IP reputation using AbuseIPDB API."""
         result = {

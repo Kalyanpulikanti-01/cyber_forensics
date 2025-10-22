@@ -40,7 +40,7 @@ shodan>=1.29.0
 # Threat intelligence APIs
 virustotal-api>=1.1.11
 abuseipdb-wrapper
-censys>=2.2.0
+censys-platform>=0.9.0  # New Censys Platform API with PAT support
 netlas
 
 # Network scanning and analysis
