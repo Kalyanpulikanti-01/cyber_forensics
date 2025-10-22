@@ -21,6 +21,7 @@ import asyncio
 import json
 import logging
 import time
+import re
 from typing import Dict, List, Optional, Any
 from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
@@ -31,19 +32,21 @@ try:
     import requests
     from netlas import Netlas
     from netlas.exception import APIError
-    # Import Censys Platform SDK (v3 API with PAT support)
-    # Note: Legacy censys package (v2 API) is deprecated and no longer supports PAT authentication
-    try:
-        from censys_platform import SDK as CensysPlatformSDK
-        CENSYS_PLATFORM_AVAILABLE = True
-    except ImportError:
-        CensysPlatformSDK = None
-        CENSYS_PLATFORM_AVAILABLE = False
-        logging.warning("Censys Platform SDK not available. Install with: pip install censys-platform>=0.9.0")
 except ImportError as e:
     logging.warning(f"Some threat intelligence dependencies not available: {e}")
 
 logger = logging.getLogger(__name__)
+
+# Import Censys Platform SDK (v3 API with PAT support)
+# Note: Legacy censys package (v2 API) is deprecated and no longer supports PAT authentication
+# Import check is done lazily to allow proper logger configuration
+try:
+    from censys_platform import SDK as CensysPlatformSDK
+    CENSYS_PLATFORM_AVAILABLE = True
+except ImportError:
+    CensysPlatformSDK = None
+    CENSYS_PLATFORM_AVAILABLE = False
+    # Warning will be logged when Censys is actually used, not at import time
 
 
 class ThreatIntelligence:
@@ -53,15 +56,28 @@ class ThreatIntelligence:
     DEFAULT_CENSYS_RESULTS_PER_PAGE = 5
     DEFAULT_CENSYS_MAX_SERVICES = 3
 
+    # Domain validation pattern (RFC 1035)
+    # Matches valid domain names: alphanumeric labels separated by dots, no leading/trailing dots or hyphens
+    DOMAIN_PATTERN = re.compile(
+        r'^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$'
+    )
+
     def __init__(self, config: Dict[str, Any]):
-        """Initialize threat intelligence analyzer with configuration."""
+        """Initialize threat intelligence analyzer with configuration.
+
+        Configuration structure:
+        - config['api_keys']['censys']: API credentials (PAT or legacy)
+        - config['censys_options']: Optional configuration overrides
+          - results_per_page: Number of results per page (default: 5)
+          - max_services: Maximum services to extract per host (default: 3)
+        """
         self.config = config
         self.timeout = config.get('timeouts', {}).get('threat_intel', 60)
         self.session = requests.Session()
         self.session.timeout = self.timeout
 
-        # Censys configuration
-        censys_config_options = config.get('censys', {})
+        # Censys configuration options (separate from API keys)
+        censys_config_options = config.get('censys_options', {})
         self.censys_results_per_page = censys_config_options.get('results_per_page', self.DEFAULT_CENSYS_RESULTS_PER_PAGE)
         self.censys_max_services = censys_config_options.get('max_services', self.DEFAULT_CENSYS_MAX_SERVICES)
         
@@ -410,12 +426,17 @@ class ThreatIntelligence:
             result['error'] = 'Invalid domain provided'
             return result
 
-        # Basic domain sanitization - remove whitespace and convert to lowercase
+        # Domain sanitization - remove whitespace and convert to lowercase
         domain = domain.strip().lower()
 
-        # Basic validation - check for valid characters
-        if not all(c.isalnum() or c in '.-' for c in domain):
-            result['error'] = 'Domain contains invalid characters'
+        # Length validation (RFC 1035: max 253 characters total, 63 per label)
+        if len(domain) > 253 or len(domain) < 1:
+            result['error'] = 'Domain length must be between 1 and 253 characters'
+            return result
+
+        # Validate domain format using RFC 1035 compliant regex
+        if not self.DOMAIN_PATTERN.match(domain):
+            result['error'] = 'Invalid domain format. Domain must contain only alphanumeric characters, hyphens, and dots. Labels cannot start or end with hyphens, and consecutive dots are not allowed.'
             return result
 
         # Check if we have PAT token
@@ -479,7 +500,7 @@ class ThreatIntelligence:
                 future = executor.submit(search_censys)
                 try:
                     search_results = await asyncio.wait_for(
-                        loop.run_in_executor(None, future.result, self.timeout),
+                        loop.run_in_executor(None, future.result),
                         timeout=self.timeout
                     )
                 except (asyncio.TimeoutError, FuturesTimeoutError):
