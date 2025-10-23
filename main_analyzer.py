@@ -670,6 +670,14 @@ Examples:
     
     # Parse formats
     formats = [f.strip() for f in args.format.split(',')]
+
+    # If all modules are run, automatically add PDF format for comprehensive reporting
+    # This ensures users get a complete report package when performing full analysis
+    # Note: PDF format is auto-enabled for '--modules all' to provide a complete audit trail
+    # Users can still specify other formats explicitly (e.g., --format json,html)
+    if 'all' in modules and 'pdf' not in formats:
+        formats.append('pdf')
+        logger.info("📄 Auto-enabled PDF format for comprehensive full analysis (use --format to override)")
     
     async def run_analysis():
         """Run the analysis asynchronously."""

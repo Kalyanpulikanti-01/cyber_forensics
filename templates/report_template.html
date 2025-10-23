@@ -119,16 +119,33 @@
 
         <div class="section">
             <h2>Threat Intelligence</h2>
-            {% if threat_intelligence.virustotal and threat_intelligence.virustotal.available %}
+            {% if threat_intelligence.get('virustotal', {}).get('available') %}
             <div class="card">
                 <h3>VirusTotal</h3>
-                <p><strong>Malicious Detections:</strong> {{ threat_intelligence.get('virustotal', {}).get('data', {}).get('data', {}).get('attributes', {}).get('last_analysis_stats', {}).get('malicious', 'N/A') }}</p>
-                <p><strong>Suspicious Detections:</strong> {{ threat_intelligence.get('virustotal', {}).get('data', {}).get('data', {}).get('attributes', {}).get('last_analysis_stats', {}).get('suspicious', 'N/A') }}</p>
+                <p><strong>Malicious Detections:</strong> {{ threat_intelligence.virustotal.data.data.attributes.last_analysis_stats.malicious | default('N/A') }}</p>
+                <p><strong>Suspicious Detections:</strong> {{ threat_intelligence.virustotal.data.data.attributes.last_analysis_stats.suspicious | default('N/A') }}</p>
             </div>
             {% else %}
             <div class="card">
                 <h3>VirusTotal</h3>
                 <p>Data not available or API key not configured.</p>
+            </div>
+            {% endif %}
+
+            {% if threat_intelligence.get('censys', {}).get('available') and threat_intelligence.censys.data %}
+            <div class="card">
+                <h3>Censys</h3>
+                <p><strong>Related Hosts Found:</strong> {{ threat_intelligence.censys.data|length }}</p>
+                <ul>
+                {% for host in threat_intelligence.censys.data %}
+                    <li>IP: {{ host.ip }}</li>
+                {% endfor %}
+                </ul>
+            </div>
+            {% else %}
+            <div class="card">
+                <h3>Censys</h3>
+                <p>Data not available{% if threat_intelligence.get('censys', {}).get('error') %}: {{ threat_intelligence.censys.error }}{% else %} or API key not configured.{% endif %}</p>
             </div>
             {% endif %}
 

@@ -4,8 +4,10 @@
   "urlvoid": "your_urlvoid_api_key_here",
   "abuseipdb": "your_abuseipdb_api_key_here",
   "censys": {
-    "api_id": "your_censys_api_id_here",
-    "api_secret": "your_censys_api_secret_here"
+    "personal_access_token": "your_censys_personal_access_token_here",
+    "organization_id": "your_organization_id_here",
+    "results_per_page": 5,
+    "max_services": 3
   },
   "netlas": "your_netlas_api_key_here",
   "ipinfo": "your_ipinfo_token_here",
