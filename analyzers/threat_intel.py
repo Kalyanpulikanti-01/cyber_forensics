@@ -65,14 +65,25 @@ class ThreatIntelligence:
     def __init__(self, config: Dict[str, Any]):
         """Initialize threat intelligence analyzer with configuration.
 
-        Configuration structure:
-        - config['api_keys']['censys']: API credentials (PAT or legacy dict)
-          Can also include optional configuration:
-          - results_per_page: Number of results per page (default: 5)
-          - max_services: Maximum services to extract per host (default: 3)
-        - config['censys_options']: Alternative location for configuration overrides (deprecated)
+        Censys Configuration (3 supported formats):
         
-        Note: Options in config['api_keys']['censys'] take precedence over config['censys_options']
+        1. Full configuration (RECOMMENDED):
+           config['api_keys']['censys'] = {
+               'personal_access_token': 'your_token',
+               'organization_id': 'your_org_id',  # optional
+               'results_per_page': 5,  # optional, default: 5
+               'max_services': 3  # optional, default: 3
+           }
+        
+        2. Simple PAT-only configuration:
+           config['api_keys']['censys'] = 'your_token'
+        
+        3. Legacy with separate options (DEPRECATED):
+           config['api_keys']['censys'] = {'personal_access_token': 'your_token'}
+           config['censys_options'] = {'results_per_page': 5, 'max_services': 3}
+        
+        Note: Options in config['api_keys']['censys'] take precedence over config['censys_options'].
+        See config/README.md for detailed configuration guide.
         """
         self.config = config
         self.timeout = config.get('timeouts', {}).get('threat_intel', 60)
@@ -509,16 +520,18 @@ class ThreatIntelligence:
 
                     return hits
 
-            # Run blocking Censys SDK call in executor with timeout
-            try:
-                search_results = await asyncio.wait_for(
-                    loop.run_in_executor(None, search_censys),
-                    timeout=self.timeout
-                )
-            except (asyncio.TimeoutError, FuturesTimeoutError):
-                result['error'] = f'Censys search timed out after {self.timeout} seconds'
-                logger.error(f"Censys search timeout for domain: {domain}")
-                return result
+            # Run blocking Censys SDK call in dedicated thread pool with proper timeout
+            # Note: Using ThreadPoolExecutor with future.result(timeout) instead of asyncio.wait_for
+            # because asyncio.wait_for cannot actually kill threads - it only raises an exception
+            # while the thread continues to run. future.result(timeout) properly handles thread timeout.
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(search_censys)
+                try:
+                    search_results = future.result(timeout=self.timeout)
+                except TimeoutError:
+                    result['error'] = f'Censys search timed out after {self.timeout} seconds'
+                    logger.error(f"Censys search timeout for domain: {domain}")
+                    return result
 
             logger.info(f"Censys: Found {len(search_results)} hosts")
 
