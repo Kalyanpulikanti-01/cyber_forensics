@@ -66,23 +66,37 @@ class ThreatIntelligence:
         """Initialize threat intelligence analyzer with configuration.
 
         Configuration structure:
-        - config['api_keys']['censys']: API credentials (PAT or legacy)
-        - config['censys_options']: Optional configuration overrides
+        - config['api_keys']['censys']: API credentials (PAT or legacy dict)
+          Can also include optional configuration:
           - results_per_page: Number of results per page (default: 5)
           - max_services: Maximum services to extract per host (default: 3)
+        - config['censys_options']: Alternative location for configuration overrides (deprecated)
+        
+        Note: Options in config['api_keys']['censys'] take precedence over config['censys_options']
         """
         self.config = config
         self.timeout = config.get('timeouts', {}).get('threat_intel', 60)
         self.session = requests.Session()
         self.session.timeout = self.timeout
 
-        # Censys configuration options (separate from API keys)
-        censys_config_options = config.get('censys_options', {})
-        self.censys_results_per_page = censys_config_options.get('results_per_page', self.DEFAULT_CENSYS_RESULTS_PER_PAGE)
-        self.censys_max_services = censys_config_options.get('max_services', self.DEFAULT_CENSYS_MAX_SERVICES)
-        
         # API keys from config
         self.api_keys = config.get('api_keys', {})
+        
+        # Censys configuration options
+        # Check in api_keys['censys'] first (preferred), then fall back to censys_options (backward compatibility)
+        censys_api_config = self.api_keys.get('censys', {})
+        censys_options_config = config.get('censys_options', {})
+        
+        # If censys is a dict, it may contain options; otherwise use censys_options
+        if isinstance(censys_api_config, dict):
+            self.censys_results_per_page = censys_api_config.get('results_per_page', 
+                                                                  censys_options_config.get('results_per_page', self.DEFAULT_CENSYS_RESULTS_PER_PAGE))
+            self.censys_max_services = censys_api_config.get('max_services',
+                                                              censys_options_config.get('max_services', self.DEFAULT_CENSYS_MAX_SERVICES))
+        else:
+            # If censys is a string (PAT), use censys_options
+            self.censys_results_per_page = censys_options_config.get('results_per_page', self.DEFAULT_CENSYS_RESULTS_PER_PAGE)
+            self.censys_max_services = censys_options_config.get('max_services', self.DEFAULT_CENSYS_MAX_SERVICES)
         self.virustotal_key = self.api_keys.get('virustotal')
         self.urlvoid_key = self.api_keys.get('urlvoid')
         self.abuseipdb_key = self.api_keys.get('abuseipdb')
@@ -495,18 +509,16 @@ class ThreatIntelligence:
 
                     return hits
 
-            # Use dedicated thread pool with timeout
-            with ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(search_censys)
-                try:
-                    search_results = await asyncio.wait_for(
-                        loop.run_in_executor(None, future.result),
-                        timeout=self.timeout
-                    )
-                except (asyncio.TimeoutError, FuturesTimeoutError):
-                    result['error'] = f'Censys search timed out after {self.timeout} seconds'
-                    logger.error(f"Censys search timeout for domain: {domain}")
-                    return result
+            # Run blocking Censys SDK call in executor with timeout
+            try:
+                search_results = await asyncio.wait_for(
+                    loop.run_in_executor(None, search_censys),
+                    timeout=self.timeout
+                )
+            except (asyncio.TimeoutError, FuturesTimeoutError):
+                result['error'] = f'Censys search timed out after {self.timeout} seconds'
+                logger.error(f"Censys search timeout for domain: {domain}")
+                return result
 
             logger.info(f"Censys: Found {len(search_results)} hosts")
 

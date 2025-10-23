@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
 """
 Test script for ALL Threat Intelligence APIs
+
+Usage:
+    python test_all_threat_intel.py [domain]
+    
+If no domain is provided, defaults to 'linkedin.com'
 """
 
 import asyncio
 import json
 import logging
+import sys
 from analyzers.threat_intel import ThreatIntelligence
 
 logging.basicConfig(level=logging.INFO)
@@ -30,7 +36,8 @@ async def test_all_apis():
         'timeouts': {'threat_intel': 60}
     }
 
-    domain = "linkedin.com"
+    # Get domain from command line argument or use default
+    domain = sys.argv[1] if len(sys.argv) > 1 else "linkedin.com"
 
     print("=" * 70)
     print("🔍 Complete Threat Intelligence Analysis")
