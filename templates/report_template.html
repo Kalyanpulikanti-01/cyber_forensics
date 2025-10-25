@@ -139,6 +139,23 @@
             </div>
             {% endif %}
 
+            {% if threat_intelligence.get('censys', {}).get('available') and threat_intelligence.censys.data %}
+            <div class="card">
+                <h3>Censys</h3>
+                <p><strong>Related Hosts Found:</strong> {{ threat_intelligence.censys.data|length }}</p>
+                <ul>
+                {% for host in threat_intelligence.censys.data %}
+                    <li>IP: {{ host.ip }}</li>
+                {% endfor %}
+                </ul>
+            </div>
+            {% else %}
+            <div class="card">
+                <h3>Censys</h3>
+                <p>Data not available{% if threat_intelligence.get('censys', {}).get('error') %}: {{ threat_intelligence.censys.error }}{% else %} or API key not configured.{% endif %}</p>
+            </div>
+            {% endif %}
+
             {% if threat_intelligence.netlas and threat_intelligence.netlas.available %}
             <div class="card">
                 <h3>Netlas.io Domain Intelligence</h3>

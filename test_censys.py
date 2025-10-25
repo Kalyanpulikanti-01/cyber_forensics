@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
 """
-Test script for Censys API integration
+Test script for Censys Platform API v3 integration.
+Tests domain search functionality using the new SDK.
+
+Usage:
+    python test_censys.py [domain]
+    
+If no domain is provided, defaults to 'example.com'
 """
 
 import asyncio
 import json
 import logging
+import sys
 from analyzers.threat_intel import ThreatIntelligence
 
 logging.basicConfig(level=logging.INFO)
@@ -32,10 +39,8 @@ async def test_censys():
         'timeouts': {'threat_intel': 60}
     }
     
-    # ===============================================
-    # CHANGE THIS DOMAIN TO ANALYZE ANY WEBSITE
-    # ===============================================
-    domain = "linkedin.com"
+    # Get domain from command line argument or use default
+    domain = sys.argv[1] if len(sys.argv) > 1 else "example.com"
     
     print("=" * 70)
     print("🔍 Censys Domain Analysis")
