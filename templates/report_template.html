@@ -125,10 +125,17 @@
                 <p><strong>Malicious Detections:</strong> {{ threat_intelligence.virustotal.data.data.attributes.last_analysis_stats.malicious | default('N/A') }}</p>
                 <p><strong>Suspicious Detections:</strong> {{ threat_intelligence.virustotal.data.data.attributes.last_analysis_stats.suspicious | default('N/A') }}</p>
             </div>
-            {% else %}
+            {% endif %}
+
+            {% if threat_intelligence.get('censys', {}).get('available') and threat_intelligence.censys.data %}
             <div class="card">
-                <h3>VirusTotal</h3>
-                <p>Data not available or API key not configured.</p>
+                <h3>Censys</h3>
+                <p><strong>Related Hosts Found:</strong> {{ threat_intelligence.censys.data|length }}</p>
+                <ul>
+                {% for host in threat_intelligence.censys.data %}
+                    <li>IP: {{ host.ip }}</li>
+                {% endfor %}
+                </ul>
             </div>
             {% endif %}
 
