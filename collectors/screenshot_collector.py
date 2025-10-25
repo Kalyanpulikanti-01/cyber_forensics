@@ -8,8 +8,13 @@ Owner: Samyama.ai - Vaidhyamegha Private Limited
 Contact: madhulatha@samyama.ai
 Website: https://Samyama.ai
 License: Proprietary - All Rights Reserved
-Version: 1.2.0
+Version: 1.1.1
 Last Updated: October 2025
+
+Configuration Parameters:
+- screenshot_dir: Directory to save screenshots (default: 'screenshots')
+- webdriver_path: Optional path to ChromeDriver executable
+- screenshot_timeout: Timeout in seconds for page load (default: 10)
 """
 
 import asyncio
@@ -49,7 +54,21 @@ class ScreenshotCollector:
         options.add_argument('--window-size=1920,1080')
         options.add_argument('user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36')
 
-        service = Service(executable_path=self.webdriver_path) if self.webdriver_path else Service()
+        # Initialize Service with proper error handling for invalid paths
+        try:
+            if self.webdriver_path:
+                from pathlib import Path
+                driver_path = Path(self.webdriver_path)
+                if not driver_path.exists():
+                    logger.warning(f"Configured webdriver_path does not exist: {self.webdriver_path}. Falling back to system PATH.")
+                    service = Service()
+                else:
+                    service = Service(executable_path=self.webdriver_path)
+            else:
+                service = Service()
+        except Exception as e:
+            logger.warning(f"Failed to configure Service with webdriver_path: {e}. Using default Service.")
+            service = Service()
 
         try:
             return webdriver.Chrome(service=service, options=options)
@@ -83,7 +102,7 @@ class ScreenshotCollector:
             # Use JavaScript to get the full page height
             height = await asyncio.to_thread(driver.execute_script, "return document.body.scrollHeight")
             await asyncio.to_thread(driver.set_window_size, 1920, height if height > 1080 else 1080)
-            await asyncio.sleep(0.5) # Small sleep to allow final rendering
+            await asyncio.sleep(0.5)  # Small sleep to allow final rendering (reduced from 2s for better performance)
 
             await asyncio.to_thread(driver.save_screenshot, str(screenshot_path))
 
