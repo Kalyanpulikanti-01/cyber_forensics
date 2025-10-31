@@ -176,6 +176,54 @@
                 <p>Data not available or API key not configured.</p>
             </div>
             {% endif %}
+
+            {% if threat_intelligence.get('sources', {}).get('shodan') %}
+            <div class="card">
+                <h3>Shodan.io Intelligence</h3>
+                {% set shodan_data = threat_intelligence.sources.shodan %}
+                {% if shodan_data.get('status') == 'success' and shodan_data.get('data') %}
+                    {% set data = shodan_data.data %}
+                    <p><strong>IP Address:</strong> {{ data.get('ip_str', 'N/A') }}</p>
+                    <p><strong>Organization:</strong> {{ data.get('org', 'N/A') }}</p>
+                    {% if data.get('country_name') %}
+                    <p><strong>Location:</strong> {{ data.get('city', 'N/A') }}, {{ data.country_name }}</p>
+                    {% endif %}
+                    {% if data.get('isp') %}
+                    <p><strong>ISP:</strong> {{ data.isp }}</p>
+                    {% endif %}
+                    {% if data.get('ports') %}
+                    <p><strong>Open Ports:</strong> {{ data.ports|join(', ') }}</p>
+                    {% endif %}
+                    {% if data.get('hostnames') %}
+                    <p><strong>Hostnames:</strong> {{ data.hostnames|join(', ') }}</p>
+                    {% endif %}
+                    {% if data.get('vulns') %}
+                    <p><strong>⚠️ Vulnerabilities Found:</strong> {{ data.vulns|length }} CVE(s)</p>
+                    <ul>
+                    {% for vuln in data.vulns.keys()|list[:5] %}
+                        <li class="risk-high">{{ vuln }}</li>
+                    {% endfor %}
+                    {% if data.vulns|length > 5 %}
+                        <li><em>...and {{ data.vulns|length - 5 }} more</em></li>
+                    {% endif %}
+                    </ul>
+                    {% else %}
+                    <p><strong>Vulnerabilities:</strong> <span class="risk-low">None detected</span></p>
+                    {% endif %}
+                    <p><em>Full technical details available in JSON export.</em></p>
+                {% else %}
+                    <p>Status: {{ shodan_data.get('status', 'unavailable') }}</p>
+                    {% if shodan_data.get('error') %}
+                    <p><em>{{ shodan_data.error }}</em></p>
+                    {% endif %}
+                {% endif %}
+            </div>
+            {% else %}
+            <div class="card">
+                <h3>Shodan.io</h3>
+                <p>Data not available or API key not configured.</p>
+            </div>
+            {% endif %}
         </div>
 
     </div>

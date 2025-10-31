@@ -22,11 +22,18 @@ import json
 import logging
 import time
 import re
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Union
 from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import base64
+from pathlib import Path
+
+try:
+    import shodan
+    SHODAN_AVAILABLE = True
+except ImportError:
+    SHODAN_AVAILABLE = False
 
 try:
     import requests
@@ -115,6 +122,15 @@ class ThreatIntelligence:
         self.urlvoid_key = self.api_keys.get('urlvoid')
         self.abuseipdb_key = self.api_keys.get('abuseipdb')
         self.netlas_key = self.api_keys.get('netlas')
+        self.shodan_key = self.api_keys.get('shodan')
+        
+        # Initialize Shodan client if available
+        self.shodan_client = None
+        if SHODAN_AVAILABLE and self.shodan_key:
+            try:
+                self.shodan_client = shodan.Shodan(self.shodan_key)
+            except Exception as e:
+                logger.warning(f"Failed to initialize Shodan client: {e}")
         
         # Censys can be either PAT (string) or old-style credentials (dict)
         censys_config = self.api_keys.get('censys', {})
@@ -134,6 +150,100 @@ class ThreatIntelligence:
         self.virustotal_domain_api = "https://www.virustotal.com/api/v3/domains"
         self.virustotal_ip_api = "https://www.virustotal.com/api/v3/ip_addresses"
         self.abuseipdb_api = "https://api.abuseipdb.com/api/v2/check"
+        
+    def _is_private_ip(self, ip: str) -> bool:
+        """Check if an IP address is private.
+        
+        Args:
+            ip: IP address to check
+            
+        Returns:
+            bool: True if the IP is private, False otherwise
+        """
+        try:
+            import ipaddress
+            return ipaddress.ip_address(ip).is_private
+        except Exception as e:
+            logger.warning(f"Invalid IP address {ip}: {e}")
+            return False
+            
+    async def _check_shodan_ip(self, ip: str) -> Dict[str, Any]:
+        """Check IP using Shodan API.
+        
+        Args:
+            ip: IP address to look up in Shodan
+            
+        Returns:
+            Dict containing Shodan results or error information
+        """
+        result = {
+            'status': 'unavailable',
+            'data': {},
+            'error': None
+        }
+
+        if not self.shodan_client:
+            result['error'] = 'Shodan client not initialized'
+            return result
+
+        try:
+            loop = asyncio.get_running_loop()
+            host_data = await loop.run_in_executor(None, self.shodan_client.host, ip)
+            result['status'] = 'success'
+            result['data'] = host_data
+        except shodan.APIError as e:
+            if 'No information available' in str(e):
+                result['status'] = 'not_found'
+                result['error'] = 'No information available for this IP'
+            else:
+                logger.error(f"Shodan IP lookup failed: {e}")
+                result['error'] = str(e)
+        except Exception as e:
+            logger.error(f"Unexpected error in Shodan IP lookup: {e}")
+            result['error'] = str(e)
+
+        return result
+        
+    async def _check_shodan_domain(self, domain: str) -> Dict[str, Any]:
+        """Search Shodan for hosts associated with domain.
+        
+        Args:
+            domain: Domain to search for in Shodan
+            
+        Returns:
+            Dict containing Shodan search results or error information
+        """
+        result = {
+            'status': 'unavailable',
+            'data': {},
+            'error': None
+        }
+
+        if not self.shodan_client:
+            result['error'] = 'Shodan client not initialized'
+            return result
+
+        try:
+            query = f'hostname:{domain}'
+            loop = asyncio.get_running_loop()
+            search_results = await loop.run_in_executor(
+                None,
+                lambda: self.shodan_client.search(query)
+            )
+            result['status'] = 'success'
+            result['data'] = search_results
+        except shodan.APIError as e:
+            if 'No results found' in str(e):
+                result['status'] = 'not_found'
+                result['error'] = 'No results found for this domain'
+            else:
+                logger.error(f"Shodan domain search failed: {e}")
+                result['error'] = str(e)
+        except Exception as e:
+            logger.error(f"Unexpected error in Shodan domain search: {e}")
+            result['error'] = str(e)
+
+        return result
         
     async def analyze_url(self, url: str) -> Dict[str, Any]:
         """Perform comprehensive threat intelligence analysis on a URL."""
@@ -178,6 +288,7 @@ class ThreatIntelligence:
             'virustotal': {},
             'netlas': {},
             'censys': {},
+            'sources': {},
             'threat_score': 0,
             'is_malicious': False,
             'categories': [],
@@ -201,7 +312,24 @@ class ThreatIntelligence:
             else:
                 tasks.append(asyncio.sleep(0))
 
-            vt_result, netlas_result, censys_result = await asyncio.gather(*tasks, return_exceptions=True)
+            if self.shodan_client:
+                tasks.append(self._check_shodan_domain(domain))
+            else:
+                tasks.append(asyncio.sleep(0))
+
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Unpack results (Shodan is optional)
+            if len(results) == 4:
+                vt_result, netlas_result, censys_result, shodan_result = results
+                if not isinstance(shodan_result, Exception) and shodan_result:
+                    result['sources']['shodan'] = shodan_result
+                    
+                    # Add vulnerability count to main result
+                    if shodan_result.get('status') == 'success' and 'vulns' in shodan_result.get('data', {}):
+                        result['vulnerabilities'] = len(shodan_result['data']['vulns'])
+            else:
+                vt_result, netlas_result, censys_result = results
 
             # Handle VirusTotal results
             if not isinstance(vt_result, Exception) and vt_result:
@@ -251,40 +379,59 @@ class ThreatIntelligence:
         """Analyze IP address reputation."""
         result = {
             'ip': ip,
-            'virustotal': {},
-            'abuseipdb': {},
-            'threat_score': 0,
-            'is_malicious': False,
-            'abuse_confidence': 0
+            'is_private': self._is_private_ip(ip),
+            'sources': {}
         }
         
+        # Initialize tasks list with common checks
+        tasks = [
+            self._check_virustotal_ip(ip),
+            self._check_abuseipdb(ip)
+        ]
+        
+        # Add Shodan check if not a private IP and client is available
+        if not result['is_private'] and self.shodan_client:
+            tasks.append(self._check_shodan_ip(ip))
+        
+        # Run all checks in parallel
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Process VirusTotal results
+        if not isinstance(results[0], Exception) and results[0]:
+            result['virustotal'] = results[0]
+        
+        # Process AbuseIPDB results
+        if len(results) > 1 and not isinstance(results[1], Exception) and results[1]:
+            result['abuseipdb'] = results[1]
+            result['abuse_confidence'] = results[1].get('data', {}).get('abuseConfidenceScore', 0)
+        
+        # Process Shodan results if available
+        if len(results) > 2 and not isinstance(results[2], Exception) and results[2]:
+            shodan_result = results[2]
+            result['sources']['shodan'] = shodan_result
+            
+            # Add vulnerability count to main result if available
+            if shodan_result.get('status') == 'success' and 'vulns' in shodan_result.get('data', {}):
+                result['vulnerabilities'] = len(shodan_result['data']['vulns'])
+        
         try:
-            # Run checks concurrently
-            tasks = []
+            # Calculate threat score based on abuse confidence
+            result['is_malicious'] = result.get('abuse_confidence', 0) > 50
+            result['threat_score'] = result.get('abuse_confidence', 0)
             
-            if self.virustotal_key:
-                tasks.append(self._check_virustotal_ip(ip))
-            else:
-                tasks.append(asyncio.sleep(0))  # Placeholder
-            
-            if self.abuseipdb_key:
-                tasks.append(self._check_abuseipdb(ip))
-            else:
-                tasks.append(asyncio.sleep(0))  # Placeholder
-            
-            vt_result, abuse_result = await asyncio.gather(*tasks, return_exceptions=True)
-            
-            if not isinstance(vt_result, Exception) and vt_result:
-                result['virustotal'] = vt_result
-            
-            if not isinstance(abuse_result, Exception) and abuse_result:
-                result['abuseipdb'] = abuse_result
-                result['abuse_confidence'] = abuse_result.get('data', {}).get('abuseConfidenceScore', 0)
-            
-            # Calculate threat score
-            if result['abuse_confidence'] > 50:
-                result['is_malicious'] = True
-                result['threat_score'] = result['abuse_confidence']
+            # Update threat score based on VirusTotal results if available
+            if 'virustotal' in result and 'data' in result['virustotal']:
+                stats = result['virustotal']['data'].get('attributes', {}).get('last_analysis_stats', {})
+                malicious = stats.get('malicious', 0)
+                suspicious = stats.get('suspicious', 0)
+                
+                if malicious > 0 or suspicious > 0:
+                    result['is_malicious'] = True
+                    # Combine abuse confidence with VT results for final score
+                    result['threat_score'] = max(
+                        result['threat_score'],
+                        min(100, (malicious * 10) + (suspicious * 5))
+                    )
             
         except Exception as e:
             logger.error(f"IP analysis failed: {e}")
