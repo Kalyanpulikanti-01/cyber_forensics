@@ -87,12 +87,14 @@ cyber_forensics/
 ```
 
 ### **External Integrations**
-- **VirusTotal API**: Malware and reputation analysis
-- **Shodan API**: Infrastructure and service discovery
-- **URLVoid API**: Multi-engine URL reputation
-- **AbuseIPDB**: IP reputation and abuse reports
-- **Censys API**: Internet-wide scanning data
+- **VirusTotal API**: Malware and reputation analysis (70+ engines)
+- **Shodan API**: Infrastructure and service discovery, vulnerability detection
 - **Netlas.io API**: Domain, DNS, and internet-wide scan intelligence
+- **Censys API**: Internet-wide scanning and certificate data
+- **URLVoid API**: Multi-engine URL reputation checking
+- **AbuseIPDB**: IP reputation and abuse reports
+
+> 📖 **Detailed Integration Guides:** See `docs/` folder for comprehensive documentation on [VirusTotal](docs/virustotal.md), [Shodan](docs/shodan.md), [Netlas](docs/netlas.md), and [Censys](docs/censys.md) integrations.
 
 ---
 
@@ -216,17 +218,25 @@ python main_analyzer.py \
 ### **API Keys Setup**
 ```json
 {
-  "virustotal": "your_vt_api_key",
+  "virustotal": "your_virustotal_api_key",
   "shodan": "your_shodan_api_key",
-  "urlvoid": "your_urlvoid_api_key",
-  "abuseipdb": "your_abuseipdb_key",
+  "netlas": "your_netlas_api_key",
   "censys": {
-    "api_id": "your_censys_id",
-    "api_secret": "your_censys_secret"
+    "personal_access_token": "your_censys_pat",
+    "organization_id": "your_org_id"
   },
-  "netlas": "your_netlas_api_key"
+  "urlvoid": "your_urlvoid_api_key",
+  "abuseipdb": "your_abuseipdb_key"
 }
 ```
+
+**API Key Acquisition:**
+- **VirusTotal**: Free tier (500/day) at https://www.virustotal.com/gui/join-us
+- **Shodan**: Membership plan ($59/month) at https://account.shodan.io
+- **Netlas**: Free tier (50/day) at https://app.netlas.io
+- **Censys**: Free tier (limited) at https://search.censys.io/register
+
+> 💡 **Tip:** Start with VirusTotal and Netlas free tiers for basic threat intelligence.
 
 ### **Analysis Profiles**
 ```yaml

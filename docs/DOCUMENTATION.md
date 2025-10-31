@@ -326,15 +326,41 @@ cyber_forensics-main/
 **File:** `analyzers/threat_intel.py`
 
 **Functions:**
-- `analyze_url(url)` - Check URL reputation
-- `analyze_domain(domain)` - Check domain reputation
-- `analyze_ip(ip)` - Check IP reputation
-- `_check_virustotal_url()` - VirusTotal API integration
+- `analyze_url(url)` - Check URL reputation (VirusTotal)
+- `analyze_domain(domain)` - Check domain reputation (VirusTotal, Netlas, Censys, Shodan)
+- `analyze_ip(ip)` - Check IP reputation (VirusTotal, AbuseIPDB, Shodan)
+- `_check_virustotal_url()` - VirusTotal URL scanning
+- `_check_shodan_ip()` - Shodan host lookup and vulnerability detection
+- `_check_shodan_domain()` - Shodan domain infrastructure search
+- `_check_netlas_domain()` - Netlas domain intelligence
+- `_check_censys_domain()` - Censys infrastructure mapping
 - `extract_iocs()` - Extract indicators of compromise
+
+**Integrated APIs:**
+- ✅ **VirusTotal**: 70+ antivirus engines for malware detection
+- ✅ **Shodan**: Vulnerability scanning and service discovery
+- ✅ **Netlas**: Infrastructure intelligence and DNS data
+- ✅ **Censys**: Internet-wide scanning and certificate analysis
+- ⚠️ **AbuseIPDB**: IP reputation (framework ready)
+- ⚠️ **URLVoid**: Multi-engine URL checking (framework ready)
 
 **Example Output:**
 ```json
 {
+  "ip": "8.8.8.8",
+  "is_private": false,
+  "sources": {
+    "shodan": {
+      "status": "success",
+      "data": {
+        "org": "Google LLC",
+        "country_name": "United States",
+        "ports": [53, 443],
+        "hostnames": ["dns.google"],
+        "vulns": {}
+      }
+    }
+  },
   "virustotal": {
     "available": true,
     "data": {
@@ -347,7 +373,7 @@ cyber_forensics-main/
   },
   "threat_score": 0,
   "is_malicious": false,
-  "recommendations": ["✅ No threats detected"]
+  "vulnerabilities": 0
 }
 ```
 
