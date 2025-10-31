@@ -26,7 +26,7 @@ Successfully created a comprehensive cyber forensics toolkit for analyzing phish
 - **Security Analyzer**: SSL/TLS analysis, security headers, vulnerability scanning
 - **Content Analyzer**: HTML/JavaScript analysis, resource enumeration
 - **Attribution Analyzer**: WHOIS data, historical analysis, similar domains
-- **Threat Intelligence**: Integration with multiple threat intel sources
+- **Threat Intelligence**: VirusTotal (malware), Shodan (vulnerabilities), Netlas (infrastructure), Censys (certificates)
 
 ### **2. Detection Modules**
 - **Phishing Detector**: Pattern recognition for phishing attempts
@@ -149,7 +149,7 @@ cyber_forensics/
 | **WHOIS Analysis** | Domain registration data | ✅ Framework |
 | **Historical Data** | Domain age, changes | ✅ Framework |
 | **Similar Domains** | Fuzzy matching, typosquatting | ✅ Framework |
-| **Threat Intel** | VirusTotal, URLVoid, AbuseIPDB | ✅ Framework |
+| **Threat Intel** | VirusTotal, Shodan, Netlas, Censys, AbuseIPDB | ✅ Working |
 | **IOC Extraction** | Automated indicator generation | ✅ Framework |
 
 ---
@@ -185,7 +185,7 @@ cyber_forensics/
 - **Error Resilience**: Graceful handling of network failures
 
 ### **Integration Capabilities**
-- **API Support**: Ready for 8+ threat intelligence sources
+- **API Support**: Integrated with VirusTotal, Shodan, Netlas, Censys (4+ active, 4+ ready)
 - **Export Formats**: JSON, PDF, HTML, IOC formats
 - **Database Ready**: Structured data for storage and analysis
 - **SIEM Integration**: Compatible with security platforms

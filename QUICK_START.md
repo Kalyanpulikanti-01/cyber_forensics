@@ -9,16 +9,24 @@
 copy config\api_keys.json.example config\api_keys.json
 ```
 
-2. Edit `config/api_keys.json` and add your VirusTotal API key:
+2. Edit `config/api_keys.json` and add your API keys:
 ```json
 {
-  "virustotal": "YOUR_API_KEY_HERE"
+  "virustotal": "YOUR_VIRUSTOTAL_KEY",
+  "shodan": "YOUR_SHODAN_KEY",
+  "netlas": "YOUR_NETLAS_KEY"
 }
 ```
 
-**Get FREE VirusTotal API Key:**
-- Visit: https://www.virustotal.com/gui/join-us
-- Sign up → Profile → API Key
+**Get API Keys (Free & Paid Options):**
+- **VirusTotal** (FREE): https://www.virustotal.com/gui/join-us
+  - 500 requests/day - Best for malware detection
+- **Netlas** (FREE): https://app.netlas.io/register
+  - 50 requests/day - Best for infrastructure intelligence
+- **Shodan** (PAID $59/month): https://account.shodan.io
+  - Unlimited IP lookups - Best for vulnerability detection
+
+> 💡 **Start with FREE tiers**: VirusTotal + Netlas provide excellent threat intelligence without cost!
 
 ---
 
@@ -113,7 +121,7 @@ python test_url.py
 | **Security Analyzer** | Is it secure? | "SSL: ✅ Valid, Headers: 70/100" |
 | **Content Analyzer** | What's on the page? | "Login form: Yes, Suspicious code: No" |
 | **Attribution Analyzer** | Who owns it? | "Domain age: 3 days, Owner: Hidden" |
-| **Threat Intelligence** | Is it known bad? | "VirusTotal: 15 engines flagged it" |
+| **Threat Intelligence** | Is it known bad? | "VirusTotal: 15 engines flagged, Shodan: 3 CVEs found" |
 | **Phishing Detector** | Is it phishing? | "Phishing Score: 75/100 - HIGH RISK" |
 
 ---
@@ -178,7 +186,7 @@ cyber_forensics/
 │   ├── security_analyzer.py     ✅ Security checks
 │   ├── content_analyzer.py      ✅ Content analysis
 │   ├── attribution_analyzer.py  ✅ WHOIS/domain info
-│   └── threat_intel.py          ✅ VirusTotal integration
+│   └── threat_intel.py          ✅ VirusTotal, Shodan, Netlas, Censys
 │
 ├── detectors/              # Threat detection
 │   ├── phishing_detector.py     ✅ Phishing detection
